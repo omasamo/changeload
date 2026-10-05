@@ -699,7 +699,7 @@ if (typeof module !== 'undefined') module.exports = SEED;
     const runs = []; let a = ws[0], b = ws[0];
     for (const w of ws.slice(1)) { if (w === b + 1) b = w; else { runs.push([a, b]); a = b = w; } }
     runs.push([a, b]);
-    return runs.map(([x, y]) => (x === y ? CL.fmtWeek(x) : CL.fmtWeek(x) + ' to ' + CL.fmtWeek(y))).join(', ');
+    return listNames(runs.map(([x, y]) => (x === y ? CL.fmtWeek(x) : CL.fmtWeek(x) + ' to ' + CL.fmtWeek(y))));
   };
   const listNames = (arr) => (arr.length <= 1 ? arr.join('') : arr.slice(0, -1).join(', ') + ' and ' + arr[arr.length - 1]);
 
@@ -798,7 +798,8 @@ if (typeof module !== 'undefined') module.exports = SEED;
       const cand = Object.keys(counts).map(initById).filter((i) => i && i.status !== 'in_flight')
         .map((i) => ({ i, k: CL.suggestShift(state, i) })).filter((x) => x.k);
       const pick = cand.sort((a, b) => Math.abs(a.k) - Math.abs(b.k))[0];
-      const weeks = [...new Set(crit.flatMap((r) => r.weeks.filter((w) => loads[r.group.id][w].zone === 'critical')))].sort((a, b) => a - b);
+      // Every Critical week in view, not only the digest's 8-week window, so the banner never leaves a peak unmentioned.
+      const weeks = [...new Set(crit.flatMap((r) => loads[r.group.id].slice(0, CL.HORIZON).filter((c) => c.zone === 'critical').map((c) => c.w)))].sort((a, b) => a - b);
       return `<div class="guide"><p><strong>${esc(listNames(crit.map((r) => r.group.name)))} ${crit.length > 1 ? 'reach' : 'reaches'} Critical</strong> in the weeks of ${esc(weeksText(weeks.slice(0, 4)))}. Each initiative was approved on its own merits; together they land on the same people.${pick ? ` Open <strong>${esc(pick.i.name)}</strong> to see the pre-approval check and its suggested slot.` : ''}</p>
         <button class="btn primary" data-act="tour-start">Take the 2-minute tour</button>${pick ? `<button class="btn" data-act="edit" data-id="${pick.i.id}">Open ${esc(pick.i.name)}</button>` : ''}<button class="btn ghost" data-act="hide-guide">Hide</button></div>`;
     }
@@ -1187,7 +1188,7 @@ if (typeof module !== 'undefined') module.exports = SEED;
      Each step replays the story from the original demo data, so Back and Next always land on the same screen. */
   const TOUR = [
     { t: 'Five projects, one group of people', focus: '.heat-wrap',
-      b: 'Halden Group runs five change projects, each approved by a different leader. Each row is a team, each column a week. Together the projects push Service Desk and Client Operations into Critical in November.',
+      b: 'Halden Group runs five change projects, each approved by a different leader. Each row is a team, each column a week. Together the projects push Service Desk and Client Operations into Critical in November, and Service Desk again just before Christmas.',
       run: () => { ui.view = 'portfolio'; ui.sel = null; } },
     { t: 'Every number has a reason', focus: '.detail',
       b: 'Service Desk in the week of 16 Nov scores 137: three projects in the same weeks, two of them going live, on a team already short-staffed. Every point traces back to a project.',
