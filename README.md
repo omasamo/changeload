@@ -1,6 +1,6 @@
 # ChangeLoad prototype
 
-Live demo: https://claude.ai/artifact/JUJ6xfnS6Y88LXsCH4yFy8 (private until shared from the page's Share menu)
+Live demo: https://omasamo.github.io/changeload/ (GitHub Pages, from https://github.com/omasamo/changeload). Artifact copy: https://claude.ai/artifact/JUJ6xfnS6Y88LXsCH4yFy8 (private until shared)
 
 - `changeload.html` is the built, self-contained page. Rebuild it with `python3 build.py` after editing `src/`.
 - `src/engine.js` holds the scoring (product-definition.md sections 4 and 5), `src/seed.js` the Halden Group demo data, `src/app.js` the UI.
