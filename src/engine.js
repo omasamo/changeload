@@ -22,7 +22,8 @@ const CL = (() => {
     capacityPct: 10, contractHours: 40,
     intensity: { 1: 0.6, 2: 0.8, 3: 1.0, 4: 1.3, 5: 1.6 },
     split: { prep: 30, golive: 50, hypercare: 20 },
-    concurrency: 0.15, goLivePenalty: 0.1, criticalGoLives: 3,
+    concurrency: 0.15, goLivePenalty: 0.1, criticalGoLives: 3, goLiveMinIntensity: 3,
+    hourlyCost: 40, // fully loaded cost per employee hour, EUR, used for the cost of overload
   };
 
   function weekDate(w) { const d = new Date(START); d.setDate(d.getDate() + 7 * w); return d; }
@@ -64,9 +65,12 @@ const CL = (() => {
           const prev = phaseOf(init, w - 1);
           const imps = init.impacts.filter((x) => x.groupId === g.id);
           if (!imps.length) continue;
-          if (prev === 'golive' || p === 'golive') golive2w++;
+          // Only go-lives that change real work (intensity 3+) count towards a go-live cluster;
+          // an awareness e-learning going live is not the same as a new core tool.
+          const big = Math.max(...imps.map((x) => x.intensity)) >= (st.goLiveMinIntensity ?? 3);
+          if (big && (prev === 'golive' || p === 'golive')) golive2w++;
           if (!p) continue;
-          if (p === 'golive') golive++;
+          if (big && p === 'golive') golive++;
           let effort = 0, weighted = 0;
           for (const imp of imps) {
             const e = imp.hours * (st.split[p] / 100) / phaseLen(init, p) * (imp.pct / 100);
@@ -153,7 +157,22 @@ const CL = (() => {
     return rows.sort((a, b) => b.peak.index - a.peak.index);
   }
 
-  return { START, HORIZON, COMPUTE, ZONES, ZONE_LABEL, PHASES, PHASE_LABEL, IMPACT_TYPES, DEFAULT_SETTINGS,
+  /* Change work above capacity: for every group-week over the Red line (Load Index 100), the share above 100
+     converted back to hours per person and multiplied by headcount. That is work people must take from their
+     normal job, so it is shown as lost hours and, at the loaded hourly cost, as money. */
+  function overload(state, loads, from = 0, n = HORIZON) {
+    const st = state.settings;
+    let hours = 0;
+    const byGroup = {};
+    for (const g of state.groups) {
+      let h = 0;
+      for (const c of loads[g.id].slice(from, from + n)) if (c.index > st.red) h += (c.index - st.red) / 100 * c.cap * g.fte;
+      byGroup[g.id] = h; hours += h;
+    }
+    return { hours, cost: hours * (st.hourlyCost ?? DEFAULT_SETTINGS.hourlyCost), byGroup };
+  }
+
+  return { overload, START, HORIZON, COMPUTE, ZONES, ZONE_LABEL, PHASES, PHASE_LABEL, IMPACT_TYPES, DEFAULT_SETTINGS,
     weekDate, fmtWeek, fmtWeekLong, phaseOf, endWeek, compute, assess, suggestShift, digest, zoneRank, withInitiative };
 })();
 if (typeof module !== 'undefined') module.exports = CL;

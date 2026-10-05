@@ -5,13 +5,33 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const clone = (o) => JSON.parse(JSON.stringify(o));
   const r0 = (n) => Math.round(n);
+  const eur = (n) => (n >= 1e6 ? '€' + (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? '€' + r0(n / 1e3) + 'k' : '€' + r0(n));
+  const hrs = (n) => r0(n).toLocaleString('en-GB');
 
   function load() { try { const s = localStorage.getItem(KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* demo still works without storage */ } }
 
+  /* Theme: follows the device unless the viewer picks Light or Dark; the choice is remembered in this browser. */
+  const THEME_KEY = 'changeload-theme';
+  let theme = 'system';
+  try { theme = localStorage.getItem(THEME_KEY) || 'system'; } catch (e) { /* default */ }
+  function applyTheme() {
+    if (theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
+  }
+  applyTheme();
+  const THEME_ICONS = {
+    light: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9 13 13M3 13l1.1-1.1M11.9 4.1 13 3"/></svg>',
+    dark: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1z"/></svg>',
+    system: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/></svg>',
+  };
+  function renderTheme() {
+    const el = $('#theme'); if (!el) return;
+    el.innerHTML = ['light', 'dark', 'system'].map((t) => `<button data-act="theme" data-t="${t}" aria-pressed="${theme === t}" title="${{ light: 'Day mode', dark: 'Night mode', system: 'Match device' }[t]}">${THEME_ICONS[t]}<span class="lbl">${{ light: 'Day', dark: 'Night', system: 'Auto' }[t]}</span></button>`).join('');
+  }
+
   let state = load() || SEED();
   const VIEWS = ['portfolio', 'initiatives', 'groups', 'alerts', 'settings'];
-  const ui = { view: 'portfolio', sel: null, group: 'sd', draft: null, isNew: false, guide: true, note: '', confirm: null };
+  const ui = { tour: null, view: 'portfolio', sel: null, group: 'sd', draft: null, isNew: false, guide: true, note: '', confirm: null };
 
   const STATUS = { idea: 'Idea', planned: 'Planned', approved: 'Approved', in_flight: 'In flight', done: 'Done' };
   const groupById = (id) => state.groups.find((g) => g.id === id);
@@ -48,6 +68,7 @@
     const dig = CL.digest(state, loads);
     $('#nav').innerHTML = VIEWS.map((v) => `<button data-act="nav" data-v="${v}" ${ui.view === v ? 'aria-current="page"' : ''}>${ICONS[v]}<span class="lbl">${LABELS[v]}</span>${v === 'alerts' && dig.length ? `<span class="badge" title="Groups forecast at Red or Critical in the next 8 weeks">${dig.length}</span>` : ''}</button>`).join('');
     $('#company').textContent = state.company + ' · demo data';
+    renderTheme();
   }
 
   function render() {
@@ -60,6 +81,7 @@
     else if (ui.view === 'alerts') main.innerHTML = viewAlerts(loads);
     else main.innerHTML = viewSettings();
     if (ui.view === 'initiatives' && ui.draft) refreshEditor();
+    renderTour();
   }
 
   /* ---------- Portfolio ---------- */
@@ -95,9 +117,9 @@
       const pick = cand.sort((a, b) => Math.abs(a.k) - Math.abs(b.k))[0];
       const weeks = [...new Set(crit.flatMap((r) => r.weeks.filter((w) => loads[r.group.id][w].zone === 'critical')))].sort((a, b) => a - b);
       return `<div class="guide"><p><strong>${esc(listNames(crit.map((r) => r.group.name)))} ${crit.length > 1 ? 'reach' : 'reaches'} Critical</strong> in the weeks of ${esc(weeksText(weeks.slice(0, 4)))}. Each initiative was approved on its own merits; together they land on the same people.${pick ? ` Open <strong>${esc(pick.i.name)}</strong> to see the pre-approval check and its suggested slot.` : ''}</p>
-        ${pick ? `<button class="btn primary" data-act="edit" data-id="${pick.i.id}">Open ${esc(pick.i.name)}</button>` : ''}<button class="btn ghost" data-act="hide-guide">Hide</button></div>`;
+        <button class="btn primary" data-act="tour-start">Take the 2-minute tour</button>${pick ? `<button class="btn" data-act="edit" data-id="${pick.i.id}">Open ${esc(pick.i.name)}</button>` : ''}<button class="btn ghost" data-act="hide-guide">Hide</button></div>`;
     }
-    return `<div class="guide"><p><strong>No group is forecast above ${dig.length ? 'Red' : 'Amber'}.</strong> Add an initiative to see the pre-approval check warn before it overwhelms anyone.</p><button class="btn primary" data-act="new-example">Try a new initiative</button><button class="btn ghost" data-act="hide-guide">Hide</button></div>`;
+    return `<div class="guide"><p><strong>No group is forecast above ${dig.length ? 'Red' : 'Amber'}.</strong> Add an initiative to see the pre-approval check warn before it overwhelms anyone.</p><button class="btn primary" data-act="new-example">Try a new initiative</button><button class="btn" data-act="tour-start">Guided demo</button><button class="btn ghost" data-act="hide-guide">Hide</button></div>`;
   }
 
   function viewPortfolio(loads) {
@@ -109,10 +131,12 @@
     const goSoon = active.filter((i) => { const g = i.start + i.prepWeeks; return g < 8; }).length;
     const open = state.feed.filter((f) => f.kind === 'critical').length;
     const critCount = dig.filter((r) => r.worst === 'critical').length;
+    const ov = CL.overload(state, loads);
+    const atRisk = dig.reduce((a, r) => a + r.group.fte, 0);
 
     const rows = state.groups.map((g) => `<tr><th class="rowhead" scope="row"><span class="g">${esc(g.name)}</span><span class="meta">${g.fte} FTE · ${esc(g.location)}</span></th>${loads[g.id].slice(0, H).map((c) => {
       const sel = ui.sel && ui.sel.g === g.id && ui.sel.w === c.w;
-      return `<td><button class="hc ${cellClass(c)}${c.golive ? ' go' : ''}${c.w === 0 ? ' now' : ''}${sel ? ' sel' : ''}" data-act="cell" data-g="${g.id}" data-w="${c.w}" title="${esc(g.name)}, week of ${CL.fmtWeekLong(c.w)}: ${r0(c.index)} (${CL.ZONE_LABEL[c.zone]})" aria-label="${esc(g.name)} week of ${CL.fmtWeek(c.w)} load ${r0(c.index)} ${c.zone}">${r0(c.index)}</button></td>`;
+      return `<td><button class="hc ${cellClass(c)}${c.golive ? ' go' : ''}${c.w === 0 ? ' now' : ''}${sel ? ' sel' : ''}" data-act="cell" data-g="${g.id}" data-w="${c.w}" title="${esc(g.name)}, week of ${CL.fmtWeekLong(c.w)}: ${r0(c.index)} (${CL.ZONE_LABEL[c.zone]})" aria-label="${esc(g.name)} week of ${CL.fmtWeek(c.w)} load ${r0(c.index)} ${c.zone}">${cellClass(c) === 'idle' ? '' : r0(c.index)}</button></td>`;
     }).join('')}</tr>`).join('');
 
     const gantt = state.initiatives.filter((i) => i.status !== 'done').map((i) => {
@@ -133,8 +157,8 @@
       <div class="summary">
         <div><span class="eyebrow">At Red or Critical, next 8 weeks</span><span class="big ${critCount ? 'crit' : ''}">${dig.length}<span class="muted" style="font-size:1rem"> of ${state.groups.length} groups</span></span><span class="sub">${critCount ? `${critCount} at Critical` : 'None at Critical'}</span></div>
         <div><span class="eyebrow">Peak load</span><span class="big">${r0(pk.c.index)}</span><span class="sub">${esc(pk.g.name)}, week of ${CL.fmtWeek(pk.c.w)}</span></div>
-        <div><span class="eyebrow">Initiatives in the plan</span><span class="big">${active.length}</span><span class="sub">${goSoon} go live in the next 8 weeks</span></div>
-        <div><span class="eyebrow">People affected</span><span class="big">${state.groups.filter((g) => loads[g.id].slice(0, H).some((c) => c.n)).reduce((a, g) => a + g.fte, 0).toLocaleString('en-GB')}</span><span class="sub">${open ? `${open} escalation${open > 1 ? 's' : ''} to the transformation office` : 'across ' + state.groups.length + ' groups'}</span></div>
+        <div><span class="eyebrow">People in overloaded teams</span><span class="big">${atRisk.toLocaleString('en-GB')}</span><span class="sub">${open ? `${open} escalation${open > 1 ? 's' : ''} to the transformation office` : `${active.length} initiatives in the plan, ${goSoon} go live in 8 weeks`}</span></div>
+        <div class="kpi-cost" title="Change work above each group's capacity over the next ${H} weeks, valued at €${state.settings.hourlyCost ?? 40} per hour. Change it in Settings."><span class="eyebrow">Cost of overload, ${H} weeks</span><span class="big ${ov.cost ? 'crit' : 'ok'}">${eur(ov.cost)}</span><span class="sub">${ov.hours ? `${hrs(ov.hours)} hours of change work above capacity` : 'No team is asked for more than it can absorb'}</span></div>
       </div>
       <div class="two-col">
         <div class="stack">
@@ -287,6 +311,9 @@
       green: ['Room for this change', 'Every affected group stays in Green while this runs.'],
     }[a.worst];
     const shift = CL.zoneRank(a.worst) >= 2 ? CL.suggestShift(state, d) : 0;
+    const ovB = CL.overload(state, a.before, 0, CL.COMPUTE), ovA = CL.overload(state, a.after, 0, CL.COMPUTE);
+    const added = Math.max(0, ovA.cost - ovB.cost);
+    const costLine = added > 1 ? `<p class="cost-line"><strong>${eur(added)}</strong> of extra overload: ${hrs(ovA.hours - ovB.hours)} hours of change work above capacity that people must take from their normal job.</p>` : '';
     const from = Math.max(0, d.start - 1), to = Math.min(CL.COMPUTE, CL.endWeek(d) + 1);
     let mini = '';
     for (const f of a.findings) {
@@ -300,6 +327,8 @@
       const items = [];
       if (f.already.length) items.push(`Already overwhelmed without this initiative in the weeks of ${weeksText(f.already)}.`);
       if (f.overwhelm.length) items.push(`This initiative pushes them into Red or Critical in the weeks of ${weeksText(f.overwhelm)}.`);
+      const cluster = f.overwhelm.concat(f.already).filter((w) => a.after[f.groupId][w].golive2w >= st.criticalGoLives && a.after[f.groupId][w].index < st.critical);
+      if (cluster.length) items.push(`Critical because ${st.criticalGoLives} or more go-lives land within two weeks (${weeksText(cluster)}), even though the score is lower.`);
       else if (f.up.length && !f.already.length) items.push(`Moves up a zone in the weeks of ${weeksText(f.up)}.`);
       return `<div class="finding"><div class="gname"><span>${esc(g.name)} <span class="muted" style="font-weight:400">peak ${r0(f.peakBefore)} → <span class="num">${r0(f.peakAfter)}</span></span></span>${zonePill(f.worstAfter)}</div><ul>${items.map((t) => `<li>${t}</li>`).join('')}</ul></div>`;
     }).join('');
@@ -309,7 +338,7 @@
     else if (shift) {
       const ns = d.start + shift;
       suggest = `<div class="suggest"><span class="eyebrow">Suggested slot</span><strong>Start ${Math.abs(shift)} week${Math.abs(shift) > 1 ? 's' : ''} ${shift > 0 ? 'later' : 'earlier'}</strong>
-        <p style="font-size:.84rem">Prep from ${CL.fmtWeekLong(ns)}, go-live in the week of ${CL.fmtWeekLong(ns + d.prepWeeks)}. Every affected group stays below Red while it runs.</p>
+        <p style="font-size:.84rem">Prep from ${CL.fmtWeekLong(ns)}, go-live in the week of ${CL.fmtWeekLong(ns + d.prepWeeks)}. Every affected group stays below Red while it runs${added > 1 ? `, and the ${eur(added)} of overload goes away` : ''}.</p>
         <div class="actions" style="justify-content:flex-start"><button class="btn primary" data-act="apply-shift" data-k="${shift}">Apply suggested slot</button></div>
         <p class="muted" style="font-size:.76rem">Or reduce scope: phase the rollout or take groups out of this release.</p></div>`;
     }
@@ -319,13 +348,13 @@
       <div class="actions"><button class="btn ${a.worst === 'critical' ? 'crit' : 'primary'}" data-act="save" ${needJust && !ui.note.trim() ? 'disabled' : ''}>${a.worst === 'critical' ? 'Save and escalate' : a.worst === 'red' ? 'Save with justification' : 'Save initiative'}</button></div></section>`;
 
     return `<div class="verdict ${a.worst}"><span class="eyebrow">Portfolio check · ${CL.ZONE_LABEL[a.worst]}</span><h2>${esc(H[0])}</h2><p style="font-size:.84rem">${H[1]}</p></div>
-      ${findings || suggest ? `<section>${findings}${suggest}</section>` : ''}
+      ${findings || suggest || costLine ? `<section>${costLine}${findings}${suggest}</section>` : ''}
       <section><span class="eyebrow">Load Index without and with this initiative</span><div class="mini-wrap"><table class="mini"><thead><tr><th></th>${days}</tr></thead><tbody>${mini}</tbody></table></div>
         <p class="muted" style="font-size:.72rem">Weeks of ${CL.fmtWeek(from)} to ${CL.fmtWeek(to - 1)}. Thresholds ${st.amber}, ${st.red} and ${st.critical}.</p></section>
       ${saveBox}`;
   }
 
-  function saveDraft() {
+  function saveDraft(quiet) {
     const d = ui.draft;
     if (!d.name.trim()) { toast('Give the initiative a name before saving.'); $('#f-name')?.focus(); return; }
     const a = d.impacts.length ? CL.assess(state, d) : { worst: 'green', findings: [] };
@@ -342,7 +371,7 @@
     save();
     ui.draft = null; ui.note = ''; ui.confirm = null; ui.sel = null;
     go('portfolio');
-    toast(a.worst === 'critical' ? 'Saved and escalated. Heatmap updated.' : 'Saved. Heatmap updated.');
+    if (!quiet) toast(a.worst === 'critical' ? 'Saved and escalated. Heatmap updated.' : 'Saved. Heatmap updated.');
   }
 
   /* ---------- Groups ---------- */
@@ -433,15 +462,65 @@
     return `<div class="page-head"><div><div class="eyebrow">Settings</div><h1>Thresholds and scoring</h1><p class="lede">Changes apply at once to the heatmap and every check. Defaults follow the product definition.</p></div>
         <div class="actions">${ui.confirm === 'reset' ? `<span class="inline-confirm">Replace everything with the original demo data? <button class="btn danger" data-act="reset">Reset</button><button class="btn ghost" data-act="confirm-off">Keep my changes</button></span>` : `<button class="btn" data-act="confirm-reset">Reset demo data</button>`}</div></div>
       <div class="settings-grid">
-        <div class="panel panel-pad stack"><h2>Zones</h2>${num('s-amber', 'amber', st.amber, 'Amber from')}${num('s-red', 'red', st.red, 'Red from')}${num('s-crit', 'critical', st.critical, 'Critical from')}${num('s-cgl', 'criticalGoLives', st.criticalGoLives, 'Go-lives in 2 weeks that make it Critical')}</div>
+        <div class="panel panel-pad stack"><h2>Zones</h2>${num('s-amber', 'amber', st.amber, 'Amber from')}${num('s-red', 'red', st.red, 'Red from')}${num('s-crit', 'critical', st.critical, 'Critical from')}${num('s-cgl', 'criticalGoLives', st.criticalGoLives, 'Go-lives in 2 weeks that make it Critical')}${num('s-gli', 'goLiveMinIntensity', st.goLiveMinIntensity ?? 3, 'Lowest intensity that counts as a go-live', 'Awareness-level changes below this do not count towards the go-live rule')}</div>
         <div class="panel panel-pad stack"><h2>Capacity</h2>${num('s-cap', 'capacityPct', st.capacityPct, 'Change capacity, % of contracted hours', 'Default for every group unless set below')}${num('s-hrs', 'contractHours', st.contractHours, 'Contracted hours per week')}
-          <p class="muted" style="font-size:.8rem">That is ${(st.contractHours * st.capacityPct / 100).toFixed(1)} hours of change per person per week.</p></div>
+          <p class="muted" style="font-size:.8rem">That is ${(st.contractHours * st.capacityPct / 100).toFixed(1)} hours of change per person per week.</p>
+          ${num('s-cost', 'hourlyCost', st.hourlyCost ?? 40, 'Loaded cost per employee hour, €', 'Values the hours of change work above capacity')}</div>
         <div class="panel panel-pad stack"><h2>Intensity weights</h2>${[1, 2, 3, 4, 5].map((n) => num('s-int' + n, 'intensity.' + n, st.intensity[n], `Intensity ${n}`, '', 0.1)).join('')}</div>
         <div class="panel panel-pad stack"><h2>Load shape</h2>${num('s-sp', 'split.prep', st.split.prep, 'Share of hours in prep, %')}${num('s-sg', 'split.golive', st.split.golive, 'Share in go-live, %')}${num('s-sh', 'split.hypercare', st.split.hypercare, 'Share in hypercare, %', splitSum !== 100 ? `Shares add up to ${splitSum}%, not 100%.` : '')}
           ${num('s-conc', 'concurrency', st.concurrency, 'Concurrency penalty per extra initiative', '', 0.01)}${num('s-glp', 'goLivePenalty', st.goLivePenalty, 'Extra penalty per overlapping go-live', '', 0.01)}</div>
       </div>
       <h2>Employee groups</h2>
       <div class="tbl-wrap"><table class="tbl impacts" style="min-width:520px"><thead><tr><th>Group</th><th>FTE</th><th>Capacity %</th><th>Baseline strain (0 to 40)</th></tr></thead><tbody>${grows}</tbody></table></div>`;
+  }
+
+  /* ---------- Guided demo ----------
+     Each step replays the story from the original demo data, so Back and Next always land on the same screen. */
+  const TOUR = [
+    { t: 'Five projects, one group of people', focus: '.heat-wrap',
+      b: 'Halden Group runs five change projects, each approved by a different leader. Each row is a team, each column a week. Together the projects push Service Desk and Client Operations into Critical in November.',
+      run: () => { ui.view = 'portfolio'; ui.sel = null; } },
+    { t: 'Every number has a reason', focus: '.detail',
+      b: 'Service Desk in the week of 16 Nov scores 137: three projects in the same weeks, two of them going live, on a team already short-staffed. Every point traces back to a project.',
+      run: () => { ui.sel = { g: 'sd', w: 6 }; } },
+    { t: 'What it costs', focus: '.kpi-cost',
+      b: 'The hours of change work above each team\'s capacity have to come out of normal work. At €40 an hour that is the cost of overload, in money a COO recognises.' },
+    { t: 'The check before approval', focus: '.whatif',
+      b: 'This is what the project manager of the ticketing migration sees before the go-live is approved: who gets overwhelmed, in which weeks, and what it costs.',
+      run: () => edit('tkt') },
+    { t: 'A better date, not a veto', focus: '.suggest',
+      b: 'ChangeLoad searches for the nearest start date that keeps every affected team below Red. Here: start 11 weeks later and go live on 1 Feb 2027, after the client migration has settled.' },
+    { t: 'One click to apply it', focus: '.whatif',
+      b: 'The suggested slot is applied. The same check now reads Amber: Service Desk is busy but within capacity, and the extra cost is gone.',
+      run: () => { const k = CL.suggestShift(state, ui.draft); if (k) ui.draft.start += k; } },
+    { t: 'Problem solved, nobody blocked', focus: '.summary',
+      b: 'Saved. No team is above Amber and the cost of overload drops to zero. The project was not stopped, it moved to a slot the people can absorb.',
+      run: () => saveDraft(true) },
+    { t: 'It keeps watching', focus: '.whatif',
+      b: 'Next, Compliance proposes an all-staff e-learning. The check shows straight away which teams can take it and which cannot. That is ChangeLoad: one view of change load, and a warning at the moment of decision.',
+      run: () => edit(null, newDraft(true)) },
+  ];
+  function tourGo(i) {
+    if (i < 0 || i >= TOUR.length) return;
+    state = SEED(); ui.draft = null; ui.note = ''; ui.confirm = null; ui.guide = false; ui.tour = i;
+    for (let k = 0; k <= i; k++) TOUR[k].run?.();
+    save();
+    ui.tour = i;
+    render();
+    const el = $(TOUR[i].focus);
+    if (el) { const r = el.getBoundingClientRect(); if (r.top < 0 || r.bottom > innerHeight - 200) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  }
+  function renderTour() {
+    document.querySelectorAll('.tour-focus').forEach((el) => el.classList.remove('tour-focus'));
+    let box = $('.tour');
+    if (ui.tour == null) { if (box) box.remove(); return; }
+    if (!box) { box = document.createElement('div'); box.className = 'tour'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Guided demo'); document.body.appendChild(box); }
+    const s = TOUR[ui.tour], last = ui.tour === TOUR.length - 1;
+    $(s.focus)?.classList.add('tour-focus');
+    box.innerHTML = `<div class="tour-top"><span class="eyebrow">Guided demo · ${ui.tour + 1} of ${TOUR.length}</span><button class="btn ghost" data-act="tour-end" aria-label="Close the tour">×</button></div>
+      <div class="tour-dots">${TOUR.map((_, k) => `<i class="${k <= ui.tour ? 'on' : ''}"></i>`).join('')}</div>
+      <h3>${esc(s.t)}</h3><p>${esc(s.b)}</p>
+      <div class="actions">${ui.tour ? '<button class="btn" data-act="tour-back">Back</button>' : ''}${last ? '<button class="btn" data-act="tour-reset">Restore demo data</button><button class="btn primary" data-act="tour-end">Explore on your own</button>' : '<button class="btn primary" data-act="tour-next">Next</button>'}</div>`;
   }
 
   /* ---------- Navigation and events ---------- */
@@ -466,6 +545,11 @@
     const d = ui.draft;
     switch (act) {
       case 'nav': go(t.dataset.v); break;
+      case 'theme': theme = t.dataset.t; try { localStorage.setItem(THEME_KEY, theme); } catch (err) { /* session only */ } applyTheme(); renderTheme(); break;
+      case 'tour-start': tourGo(0); break;
+      case 'tour-next': tourGo(ui.tour + 1); break;
+      case 'tour-back': tourGo(ui.tour - 1); break;
+      case 'tour-end': ui.tour = null; render(); break;
       case 'cell': ui.sel = { g: t.dataset.g, w: +t.dataset.w }; render(); break;
       case 'group': ui.group = t.dataset.g; go('groups'); break;
       case 'edit': edit(t.dataset.id); break;
@@ -483,10 +567,16 @@
       case 'confirm-off': ui.confirm = null; render(); break;
       case 'delete': state.initiatives = state.initiatives.filter((i) => i.id !== d.id); save(); ui.draft = null; ui.sel = null; go('initiatives'); toast('Initiative deleted.'); break;
       case 'reset': state = SEED(); save(); ui.sel = null; ui.guide = true; ui.confirm = null; render(); toast('Demo data restored.'); break;
+      case 'tour-reset': state = SEED(); save(); ui.sel = null; ui.draft = null; ui.guide = true; go('portfolio'); toast('Demo data restored.'); break;
     }
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.matches('tr[data-act]')) e.target.click();
+    if (ui.tour != null && e.target === document.body) {
+      if (e.key === 'ArrowRight' && ui.tour < TOUR.length - 1) tourGo(ui.tour + 1);
+      else if (e.key === 'ArrowLeft' && ui.tour > 0) tourGo(ui.tour - 1);
+      else if (e.key === 'Escape') { ui.tour = null; render(); }
+    }
   });
 
   document.addEventListener('input', (e) => {
