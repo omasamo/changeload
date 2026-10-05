@@ -49,6 +49,16 @@ test('awareness-level go-lives do not trigger the go-live cluster rule', () => {
   assert.equal(CL.compute(mk(4)).g[0].zone, 'critical');
 });
 
+test('the check tells a push over the line from landing on an already overloaded team', () => {
+  const s = SEED();
+  const tkt = CL.assess(s, s.initiatives.find((i) => i.id === 'tkt'));
+  const pushes = tkt.findings.filter((f) => f.overwhelm.length).map((f) => f.groupId).sort();
+  assert.deepEqual(pushes, ['co', 'sd'], 'ticket migration pushes Service Desk and Client Operations over');
+  const spl = CL.assess(s, s.initiatives.find((i) => i.id === 'spl'));
+  assert.ok(spl.findings.some((f) => f.already.length), 'the link migration lands on teams that are already overloaded');
+  assert.ok(spl.findings.every((f) => f.overwhelm.length <= 1), 'and at most tips a borderline week over, it is not the cause');
+});
+
 test('ideas and finished initiatives are left out of the load', () => {
   const s = SEED();
   for (const i of s.initiatives) i.status = 'idea';

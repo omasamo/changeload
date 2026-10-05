@@ -7,7 +7,10 @@ Live demo: https://omasamo.github.io/changeload/ (GitHub Pages, from https://git
 - Data lives in the viewer's browser. Settings > Reset demo data restores the starting scenario.
 
 ## Guided demo
-Click **Guided demo** in the left rail (or "Take the 2-minute tour" in the banner). Eight steps walk a manager or investor through the story with Next and Back (arrow keys work too). Each step replays from the original demo data, so it always shows the same screens. **Day / Night / Auto** under Display switches the colour theme; the choice is remembered in the browser.
+Click **Guided demo** in the left rail (or "Take the 2-minute tour" in the banner). Eight steps walk a manager or investor through the story with Next and Back (arrow keys work too). The bar docks at the bottom of the screen so it never covers the panel it is talking about. Each step replays from the original demo data, so it always shows the same screens. **Day / Night / Auto** under Display switches the colour theme; the choice is remembered in the browser.
+
+## Layout
+The portfolio reads top to bottom in the order a manager asks the questions: how bad is it (four figures), where and when (the heatmap, with the selected cell explained in the panel on the right), and what to do (the banner and the pre-approval check). The heatmap sizes its cells to the window so all 26 weeks fit on a laptop; when they cannot, a fade at the right edge shows there is more to scroll. In the initiative editor the portfolio check is a sticky panel that follows the form. On a phone the five views move to a tab bar at the bottom and the figures come before the story.
 
 ## Tests
 `node --test tests/engine.test.js` checks the scoring engine and the demo story (Critical in November, 11-week suggested slot, €160k cost of overload that drops to zero). The Pages workflow runs it before every deploy.

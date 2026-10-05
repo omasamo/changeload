@@ -67,7 +67,7 @@
   function renderRail(loads) {
     const dig = CL.digest(state, loads);
     $('#nav').innerHTML = VIEWS.map((v) => `<button data-act="nav" data-v="${v}" ${ui.view === v ? 'aria-current="page"' : ''}>${ICONS[v]}<span class="lbl">${LABELS[v]}</span>${v === 'alerts' && dig.length ? `<span class="badge" title="Groups forecast at Red or Critical in the next 8 weeks">${dig.length}</span>` : ''}</button>`).join('');
-    $('#company').textContent = state.company + ' · demo data';
+    $('#company').textContent = state.company + ' · demo';
     renderTheme();
   }
 
@@ -81,8 +81,36 @@
     else if (ui.view === 'alerts') main.innerHTML = viewAlerts(loads);
     else main.innerHTML = viewSettings();
     if (ui.view === 'initiatives' && ui.draft) refreshEditor();
+    document.title = (ui.draft ? ui.draft.name || 'New initiative' : LABELS[ui.view]) + ' · ChangeLoad';
     renderTour();
+    fitHeat();
   }
+
+  /* The 26-week heatmap fits the space it has: cells shrink to 26px before the table scrolls, and a fade marks hidden columns. */
+  const SCROLLERS = '.heat-wrap, .tbl-wrap, .mini-wrap, .impacts-wrap, .chart-wrap';
+  function markScroll(wrap) { const sc = wrap.querySelector('.scroll-x') || wrap; wrap.classList.toggle('more', sc.scrollWidth - sc.clientWidth - sc.scrollLeft > 4); }
+  function fitHeat() {
+    document.querySelectorAll('.heat-wrap').forEach((wrap) => {
+      const head = wrap.querySelector('tbody .rowhead');
+      const rw = head ? head.getBoundingClientRect().width : 176;
+      const hc = Math.max(24, Math.min(36, Math.floor((wrap.clientWidth - rw - 16) / CL.HORIZON) - 2));
+      wrap.style.setProperty('--hc', hc + 'px');
+      wrap.classList.toggle('tight', hc < 29);
+    });
+    document.querySelectorAll(SCROLLERS).forEach(markScroll);
+    fitInspector();
+  }
+  /* The check panel is sticky; cap its height to what is left of the viewport below it, so the save row is always on screen. */
+  function fitInspector() {
+    const w = $('#whatif'); if (!w || w.dataset.free) return;
+    if (innerWidth <= 1100) { w.style.maxHeight = ''; return; }
+    const top = Math.max(16, Math.round(w.getBoundingClientRect().top));
+    w.style.maxHeight = `calc(100vh - ${top + 16}px - var(--dock, 0px))`;
+  }
+  let fitTimer;
+  window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitHeat, 80); });
+  window.addEventListener('scroll', fitInspector, { passive: true });
+  document.addEventListener('scroll', (e) => { if (e.target instanceof Element && e.target.matches('.scroll-x')) markScroll(e.target.parentElement); }, true);
 
   /* ---------- Portfolio ---------- */
   function peakCell(loads) {
@@ -127,12 +155,12 @@
     const dig = CL.digest(state, loads);
     const pk = peakCell(loads);
     if (!ui.sel) ui.sel = { g: pk.g.id, w: pk.c.w };
-    const active = state.initiatives.filter((i) => i.status !== 'done' && i.status !== 'idea');
-    const goSoon = active.filter((i) => { const g = i.start + i.prepWeeks; return g < 8; }).length;
     const open = state.feed.filter((f) => f.kind === 'critical').length;
     const critCount = dig.filter((r) => r.worst === 'critical').length;
     const ov = CL.overload(state, loads);
     const atRisk = dig.reduce((a, r) => a + r.group.fte, 0);
+    const hotNames = dig.map((r) => r.group.name);
+    const st = state.settings;
 
     const rows = state.groups.map((g) => `<tr><th class="rowhead" scope="row"><span class="g">${esc(g.name)}</span><span class="meta">${g.fte} FTE · ${esc(g.location)}</span></th>${loads[g.id].slice(0, H).map((c) => {
       const sel = ui.sel && ui.sel.g === g.id && ui.sel.w === c.w;
@@ -155,24 +183,27 @@
         <div class="actions"><button class="btn" data-act="nav" data-v="alerts">Weekly digest</button><button class="btn primary" data-act="new">New initiative</button></div></div>
       ${ui.guide ? guideFor(loads) : ''}
       <div class="summary">
-        <div><span class="eyebrow">At Red or Critical, next 8 weeks</span><span class="big ${critCount ? 'crit' : ''}">${dig.length}<span class="muted" style="font-size:1rem"> of ${state.groups.length} groups</span></span><span class="sub">${critCount ? `${critCount} at Critical` : 'None at Critical'}</span></div>
-        <div><span class="eyebrow">Peak load</span><span class="big">${r0(pk.c.index)}</span><span class="sub">${esc(pk.g.name)}, week of ${CL.fmtWeek(pk.c.w)}</span></div>
-        <div><span class="eyebrow">People in overloaded teams</span><span class="big">${atRisk.toLocaleString('en-GB')}</span><span class="sub">${open ? `${open} escalation${open > 1 ? 's' : ''} to the transformation office` : `${active.length} initiatives in the plan, ${goSoon} go live in 8 weeks`}</span></div>
-        <div class="kpi-cost" title="Change work above each group's capacity over the next ${H} weeks, valued at €${state.settings.hourlyCost ?? 40} per hour. Change it in Settings."><span class="eyebrow">Cost of overload, ${H} weeks</span><span class="big ${ov.cost ? 'crit' : 'ok'}">${eur(ov.cost)}</span><span class="sub">${ov.hours ? `${hrs(ov.hours)} hours of change work above capacity` : 'No team is asked for more than it can absorb'}</span></div>
+        <div class="tile" role="button" tabindex="0" data-act="nav" data-v="alerts" title="Open the weekly digest"><span class="eyebrow">At Red or Critical, next 8 weeks</span><span class="big ${critCount ? 'crit' : ''}">${dig.length}<span class="muted of"> of ${state.groups.length} groups</span></span><span class="sub">${critCount ? `${critCount} at Critical` : 'None at Critical'}${open ? ` · ${open} escalation${open > 1 ? 's' : ''} open` : ''}</span></div>
+        <div><span class="eyebrow">People in overloaded teams</span><span class="big ${atRisk ? 'crit' : ''}">${atRisk.toLocaleString('en-GB')}</span><span class="sub">${hotNames.length ? (hotNames.length <= 2 ? esc(listNames(hotNames)) : `${hotNames.length} groups, led by ${esc(hotNames[0])}`) : 'No team above Red in the next 8 weeks'}</span></div>
+        <div class="kpi-cost" title="Change work above each group's capacity over the next ${H} weeks, valued at €${st.hourlyCost ?? 40} per hour. Change it in Settings."><span class="eyebrow">Cost of overload, ${H} weeks</span><span class="big ${ov.cost ? 'crit' : 'ok'}">${eur(ov.cost)}</span><span class="sub">${ov.hours ? `${hrs(ov.hours)} hours of change work above capacity` : 'No team is asked for more than it can absorb'}</span></div>
+        <div class="tile" role="button" tabindex="0" data-act="cell" data-g="${pk.g.id}" data-w="${pk.c.w}" title="Show this week in the heatmap"><span class="eyebrow">Peak load</span><span class="big">${r0(pk.c.index)}</span><span class="sub">${esc(pk.g.name)}, week of ${CL.fmtWeek(pk.c.w)}</span></div>
       </div>
       <div class="two-col">
         <div class="stack">
-          <div class="heat-wrap"><table class="heat">${heatHeader(0, H)}<tbody>${rows}
+          <div class="heat-wrap"><div class="scroll-x"><table class="heat"><caption class="sr-only">Load Index by employee group and week. Select a cell to see the initiatives behind it.</caption>${heatHeader(0, H)}<tbody>${rows}
             <tr class="sep"><th class="rowhead"></th><td colspan="${H}"></td></tr>
             <tr><th class="rowhead"><span class="eyebrow">Initiatives</span></th><td colspan="${H}"></td></tr>
-          </tbody><tbody class="gantt">${gantt}</tbody></table></div>
+          </tbody><tbody class="gantt">${gantt}</tbody></table></div></div>
           <div class="legend">
-            <span><i class="swatch" style="background:var(--z-green)"></i>Green below ${state.settings.amber}</span>
-            <span><i class="swatch" style="background:var(--z-amber)"></i>Amber ${state.settings.amber} to ${state.settings.red}</span>
-            <span><i class="swatch" style="background:var(--z-red)"></i>Red ${state.settings.red} to ${state.settings.critical}</span>
-            <span><i class="swatch" style="background:var(--z-crit)"></i>Critical above ${state.settings.critical}, or ${state.settings.criticalGoLives}+ go-lives in 2 weeks</span>
-            <span><i class="swatch" style="background:var(--muted);border-radius:50%;width:6px;height:6px"></i>Go-live week</span>
-            <span><i class="swatch" style="background:var(--i0);opacity:.35"></i>Prep</span><span><i class="swatch" style="background:var(--i0)"></i>Go-live</span><span><i class="swatch" style="background:var(--i0);opacity:.6"></i>Hypercare</span>
+            <div class="grp"><span class="eyebrow">Load Index</span>
+              <span><i class="swatch" style="background:var(--z-green)"></i>Green below ${st.amber}</span>
+              <span><i class="swatch" style="background:var(--z-amber)"></i>Amber ${st.amber} to ${st.red}</span>
+              <span><i class="swatch" style="background:var(--z-red)"></i>Red ${st.red} to ${st.critical}</span>
+              <span><i class="swatch" style="background:var(--z-crit)"></i>Critical above ${st.critical}, or ${st.criticalGoLives}+ go-lives in 2 weeks</span>
+              <span><i class="swatch dot"></i>Go-live week</span>
+              <span><i class="swatch today"></i>This week</span></div>
+            <div class="grp"><span class="eyebrow">Initiative phases</span>
+              <span><i class="ph prep"></i>Prep</span><span><i class="ph golive"></i>Go-live</span><span><i class="ph hypercare"></i>Hypercare</span></div>
           </div>
         </div>
         ${cellDetail(loads)}
@@ -189,10 +220,10 @@
       <div class="hdr"><div><div class="eyebrow">${esc(g.name)} · week of ${CL.fmtWeekLong(c.w)}</div><div class="score">${r0(c.index)}</div></div>${zonePill(c.zone)}</div>
       <p class="muted" style="font-size:.82rem">${c.n ? `${c.n} initiative${c.n > 1 ? 's' : ''} active, ${c.hours.toFixed(1)} hours of change work per person this week against ${c.cap.toFixed(1)} hours of capacity.` : 'No initiative touches this group this week.'}</p>
       <div class="brk">
-        ${parts.map((p) => { const i = initById(p.initId); return `<div class="brk-row"><span class="nm"><span class="swatch" style="background:${color(i)}"></span><span>${esc(i.name)}</span></span><span class="num">${r0(p.points)}</span><span class="bar"><i style="width:${(p.points / scale) * 100}%;background:${color(i)}"></i></span><span class="muted" style="font-size:.72rem;grid-column:1/-1">${CL.PHASE_LABEL[p.phase]} · ${p.effort.toFixed(1)} h per person</span></div>`; }).join('')}
-        ${c.strain ? `<div class="brk-row"><span class="nm"><span class="swatch" style="background:var(--strain)"></span><span>Baseline strain${g.note ? ': ' + esc(g.note) : ''}</span></span><span class="num">${c.strain}</span><span class="bar"><i style="width:${(c.strain / scale) * 100}%;background:var(--strain)"></i></span></div>` : ''}
+        ${parts.map((p) => { const i = initById(p.initId); return `<div class="brk-row"><span class="nm"><span class="swatch" style="background:${color(i)}"></span><span title="${esc(i.name)}">${esc(i.name)}</span></span><span class="num">${r0(p.points)}</span><span class="bar"><i style="width:${(p.points / scale) * 100}%;background:${color(i)}"></i></span><span class="muted" style="font-size:.72rem;grid-column:1/-1">${CL.PHASE_LABEL[p.phase]} · ${p.effort.toFixed(1)} h per person</span></div>`; }).join('')}
+        ${c.strain ? `<div class="brk-row"><span class="nm"><span class="swatch" style="background:var(--strain)"></span><span>Baseline strain</span></span><span class="num">${c.strain}</span><span class="bar"><i style="width:${(c.strain / scale) * 100}%;background:var(--strain)"></i></span>${g.note ? `<span class="muted" style="font-size:.72rem;grid-column:1/-1">${esc(g.note)}</span>` : ''}</div>` : ''}
       </div>
-      ${c.n ? `<div class="formula"><span>Weighted hours <span class="mono">${sumW.toFixed(2)}</span> ÷ capacity <span class="mono">${c.cap.toFixed(1)} h</span> × 100</span>
+      ${c.n ? `<div class="formula"><span>Weighted hours <span class="mono">${sumW.toFixed(2)}</span> ÷ capacity <span class="mono">${c.cap.toFixed(1)}&nbsp;h</span>&nbsp;×&nbsp;100</span>
         <span>× concurrency <span class="mono">${c.mult.toFixed(2)}</span> for ${c.n} overlapping initiative${c.n > 1 ? 's' : ''}${c.golive > 1 ? ` and ${c.golive} go-lives` : ''}</span>
         ${c.strain ? `<span>+ baseline strain <span class="mono">${c.strain}</span></span>` : ''}
         ${c.golive2w >= st.criticalGoLives ? `<span><strong>${c.golive2w} go-lives within two weeks</strong> makes this Critical regardless of score.</span>` : ''}</div>` : ''}
@@ -201,24 +232,35 @@
   }
 
   /* ---------- Initiatives ---------- */
+  /* What the initiative does to the groups it touches, in words: its own push over the line, or the pile it lands on. */
+  function effectText(a) {
+    const name = (f) => groupById(f.groupId).name;
+    const pushes = a.findings.filter((f) => f.overwhelm.length).map(name);
+    const already = a.findings.filter((f) => f.already.length && !f.overwhelm.length).map(name);
+    if (pushes.length) return `Pushes ${listNames(pushes)} into Red or Critical`;
+    if (already.length) return `Lands on ${listNames(already)} while already overloaded`;
+    if (a.worst === 'amber') return 'Takes affected groups near capacity';
+    return 'Within capacity for every group it touches';
+  }
   function viewInitiatives() {
     const rows = state.initiatives.map((i) => {
       const a = CL.assess(state, i);
       const counted = i.status !== 'done' && i.status !== 'idea';
       return `<tr class="click" data-act="edit" data-id="${i.id}" tabindex="0">
         <td><div class="name"><span class="swatch" style="background:${color(i)}"></span>${esc(i.name)}</div><div class="sub">${esc(i.unit)} · ${esc(i.owner)}</div></td>
-        <td><span class="pill status">${STATUS[i.status]}</span></td>
+        <td><span class="pill status">${STATUS[i.status]}</span>${counted ? '' : '<div class="sub">Not in the heatmap</div>'}</td>
         <td class="num">${CL.fmtWeek(i.start)}</td>
         <td class="num">${CL.fmtWeek(i.start + i.prepWeeks)}</td>
         <td class="r num">${new Set(i.impacts.map((x) => x.groupId)).size}</td>
         <td class="r num">${i.impacts.reduce((s, x) => s + (groupById(x.groupId)?.fte || 0) * x.pct / 100, 0).toLocaleString('en-GB', { maximumFractionDigits: 0 })}</td>
-        <td>${a.groupIds.length ? zonePill(a.worst) : '<span class="muted">No impacts</span>'}${counted ? '' : ' <span class="sub">not in plan</span>'}</td>
+        <td>${a.groupIds.length ? `<div class="effect">${zonePill(a.worst)}<span class="sub">${esc(effectText(a))}</span></div>` : '<span class="muted">No impacts yet</span>'}</td>
+        <td class="chev" aria-hidden="true">›</td>
       </tr>`;
     }).join('');
     return `<div class="page-head"><div><div class="eyebrow">Initiative register</div><h1>Initiatives</h1>
-      <p class="lede">Every project that changes how people work, with the groups it touches. The last column is the highest zone any affected group reaches while the initiative runs.</p></div>
-      <div class="actions"><button class="btn" data-act="new-example">New from example</button><button class="btn primary" data-act="new">New initiative</button></div></div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Initiative</th><th>Status</th><th>Prep starts</th><th>Go-live</th><th class="r">Groups</th><th class="r">People</th><th>Peak zone while running</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      <p class="lede">Every project that changes how people work, with the groups it touches. The last column shows the highest zone those groups reach while it runs, and whether this initiative is what pushes them there.</p></div>
+      <div class="actions"><button class="btn" data-act="new-example" title="Adds an all-staff compliance e-learning as a draft, so you can watch the check warn">Try an example</button><button class="btn primary" data-act="new">New initiative</button></div></div>
+      <div class="tbl-wrap"><div class="scroll-x"><table class="tbl"><thead><tr><th>Initiative</th><th>Status</th><th>Prep starts</th><th>Go-live</th><th class="r">Groups</th><th class="r">People</th><th>Effect while it runs</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
 
   function newDraft(example) {
@@ -244,7 +286,7 @@
         <td class="x"><button class="btn ghost" data-act="imp-del" data-k="${k}" aria-label="Remove impact" title="Remove">×</button></td></tr>`).join('');
     const free = state.groups.filter((g) => !d.impacts.some((x) => x.groupId === g.id));
     return `<div class="page-head"><div><div class="eyebrow"><a href="#initiatives" data-act="cancel">Initiatives</a> / ${ui.isNew ? 'New' : 'Edit'}</div><h1>${esc(d.name || 'New initiative')}</h1>
-      <p class="lede">The portfolio check on the right updates as you edit. Nothing changes in the heatmap until you save.</p></div></div>
+      <p class="lede">The portfolio check updates as you edit. Nothing changes in the heatmap until you save.</p></div></div>
       <div class="editor">
         <div class="panel panel-pad">
           <div class="form-section">
@@ -272,7 +314,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h2>Impact on employee groups</h2>
               ${free.length ? `<div class="actions"><button class="btn" data-act="imp-add">Add group</button>${free.length > 1 ? `<button class="btn ghost" data-act="imp-all">Add all groups</button>` : ''}</div>` : ''}</div>
             <p class="muted" style="font-size:.8rem">Intensity runs from 1 (awareness only) to 5 (core daily work changes). Hours are the total per person across prep, go-live and hypercare. Picking a type fills typical values.</p>
-            ${d.impacts.length ? `<div class="impacts-wrap"><table class="impacts"><thead><tr><th>Group</th><th>Type</th><th>Intensity</th><th>Hours</th><th>% affected</th><th></th></tr></thead><tbody>${imp}</tbody></table></div>` : `<p class="empty">No groups yet. Add the groups whose work changes.</p>`}
+            ${d.impacts.length ? `<div class="impacts-wrap"><div class="scroll-x"><table class="impacts"><thead><tr><th>Group</th><th>Type</th><th>Intensity</th><th>Hours</th><th>% of group</th><th></th></tr></thead><tbody>${imp}</tbody></table></div></div>` : `<p class="empty">No groups yet. Add the groups whose work changes.</p>`}
           </div>
           <div class="form-section">
             <div class="actions" style="justify-content:space-between">
@@ -294,14 +336,17 @@
       <p class="muted" style="font-size:.78rem;margin-top:6px">Go-live in the week of <strong>${CL.fmtWeekLong(d.start + d.prepWeeks)}</strong>, finished by ${CL.fmtWeekLong(d.start + total)}.</p>`;
     const h = $('h1'); if (h) h.textContent = d.name || 'New initiative';
     const box = $('#whatif'); if (box) box.innerHTML = whatIf();
+    fitHeat();
   }
 
   function whatIf() {
     const d = ui.draft;
-    if (!d.impacts.length) return `<div class="verdict green"><span class="eyebrow">Portfolio check</span><h2>Add affected groups to run the check</h2></div><section><p class="muted">The check compares the portfolio with and without this initiative for every group it touches.</p></section>`;
+    if (!d.impacts.length) return `<div class="verdict green"><span class="eyebrow">Portfolio check</span><h2>Add affected groups to run the check</h2></div><div class="scroll"><section><p class="muted">The check compares the portfolio with and without this initiative for every group it touches.</p></section></div>`;
     const a = CL.assess(state, d);
     const st = state.settings;
-    const names = (fn) => a.findings.filter(fn).map((f) => groupById(f.groupId).name);
+    // Worst-hit groups first, so the reader meets the problem before the detail.
+    const order = [...a.findings].sort((x, y) => CL.zoneRank(y.worstAfter) - CL.zoneRank(x.worstAfter) || y.peakAfter - x.peakAfter);
+    const names = (fn) => order.filter(fn).map((f) => groupById(f.groupId).name);
     const hot = names((f) => CL.zoneRank(f.worstAfter) >= 2);
     const warm = names((f) => f.worstAfter === 'amber');
     const H = {
@@ -316,13 +361,13 @@
     const costLine = added > 1 ? `<p class="cost-line"><strong>${eur(added)}</strong> of extra overload: ${hrs(ovA.hours - ovB.hours)} hours of change work above capacity that people must take from their normal job.</p>` : '';
     const from = Math.max(0, d.start - 1), to = Math.min(CL.COMPUTE, CL.endWeek(d) + 1);
     let mini = '';
-    for (const f of a.findings) {
+    for (const f of order) {
       const g = groupById(f.groupId);
       const row = (L, lab) => `<tr><th scope="row">${lab}</th>${L[g.id].slice(from, to).map((c) => `<td><span class="hc ${cellClass(c)}" title="${CL.fmtWeek(c.w)}: ${r0(c.index)}">${r0(c.index)}</span></td>`).join('')}</tr>`;
-      mini += `<tr><th colspan="${to - from + 1}" style="padding-top:6px;color:var(--ink);font-weight:650;font-size:.72rem">${esc(g.name)}</th></tr>${row(a.before, 'Without')}${row(a.after, 'With')}`;
+      mini += `<tr><th colspan="${to - from + 1}" class="gh">${esc(g.name)}</th></tr>${row(a.before, 'Without')}${row(a.after, 'With')}`;
     }
     const days = Array.from({ length: to - from }, (_, k) => `<th>${CL.weekDate(from + k).getDate()}</th>`).join('');
-    const findings = a.findings.filter((f) => f.already.length || f.overwhelm.length || f.up.length).map((f) => {
+    const findings = order.filter((f) => f.already.length || f.overwhelm.length || f.up.length).map((f) => {
       const g = groupById(f.groupId);
       const items = [];
       if (f.already.length) items.push(`Already overwhelmed without this initiative in the weeks of ${weeksText(f.already)}.`);
@@ -343,14 +388,18 @@
         <p class="muted" style="font-size:.76rem">Or reduce scope: phase the rollout or take groups out of this release.</p></div>`;
     }
     const needJust = a.worst === 'red' || a.worst === 'critical';
-    const saveBox = `<section>
-      ${needJust ? `<div class="field"><label for="f-note">${a.worst === 'critical' ? 'Decision request for the sponsor' : 'Justification for going ahead at Red'}</label><textarea id="f-note" data-note="1" placeholder="${a.worst === 'critical' ? 'Why this date matters and what support the affected groups will get' : 'Why this cannot move, and how the groups will be supported'}">${esc(ui.note)}</textarea><span class="hint">ChangeLoad warns and escalates. It never blocks a project.</span></div>` : ''}
-      <div class="actions"><button class="btn ${a.worst === 'critical' ? 'crit' : 'primary'}" data-act="save" ${needJust && !ui.note.trim() ? 'disabled' : ''}>${a.worst === 'critical' ? 'Save and escalate' : a.worst === 'red' ? 'Save with justification' : 'Save initiative'}</button></div></section>`;
+    const blocked = needJust && !ui.note.trim();
+    const blockedHint = `Write the ${a.worst === 'critical' ? 'decision request' : 'justification'} above to save.`;
+    const saveBox = `<section class="savebox">
+      ${needJust ? `<div class="field"><label for="f-note">${a.worst === 'critical' ? 'Decision request for the sponsor' : 'Justification for going ahead at Red'}</label><textarea id="f-note" data-note="1" placeholder="${a.worst === 'critical' ? 'Why this date matters and what support the affected groups will get' : 'Why this cannot move, and how the groups will be supported'}">${esc(ui.note)}</textarea></div>` : ''}
+      <div class="saverow"><span class="hint" id="save-hint" data-blocked="${esc(blockedHint)}">${blocked ? blockedHint : 'ChangeLoad warns and escalates. It never blocks a project.'}</span><button class="btn ${a.worst === 'critical' ? 'crit' : 'primary'}" data-act="save" ${blocked ? 'disabled' : ''}>${a.worst === 'critical' ? 'Save and escalate' : a.worst === 'red' ? 'Save with justification' : 'Save initiative'}</button></div></section>`;
 
     return `<div class="verdict ${a.worst}"><span class="eyebrow">Portfolio check · ${CL.ZONE_LABEL[a.worst]}</span><h2>${esc(H[0])}</h2><p style="font-size:.84rem">${H[1]}</p></div>
+      <div class="scroll">
       ${findings || suggest || costLine ? `<section>${costLine}${findings}${suggest}</section>` : ''}
-      <section><span class="eyebrow">Load Index without and with this initiative</span><div class="mini-wrap"><table class="mini"><thead><tr><th></th>${days}</tr></thead><tbody>${mini}</tbody></table></div>
+      <section><span class="eyebrow">Load Index without and with this initiative</span><div class="mini-wrap"><div class="scroll-x"><table class="mini" style="min-width:${56 + (to - from) * 24}px"><colgroup><col class="lab"><col span="${to - from}"></colgroup><thead><tr><th></th>${days}</tr></thead><tbody>${mini}</tbody></table></div></div>
         <p class="muted" style="font-size:.72rem">Weeks of ${CL.fmtWeek(from)} to ${CL.fmtWeek(to - 1)}. Thresholds ${st.amber}, ${st.red} and ${st.critical}.</p></section>
+      </div>
       ${saveBox}`;
   }
 
@@ -398,8 +447,8 @@
       if (c.index >= st.red || c.zone === 'critical') s += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y(c.index) - 4).toFixed(1)}" text-anchor="middle" style="fill:var(--ink);font-weight:600">${r0(c.index)}</text>`;
       if (w % 2 === 0) s += `<text x="${(x + bw / 2).toFixed(1)}" y="${Ht - 10}" text-anchor="middle">${CL.fmtWeek(w)}</text>`;
     });
-    for (const [k, col] of [['amber', 'var(--z-amber)'], ['red', 'var(--z-red)'], ['critical', 'var(--z-crit)']]) {
-      s += `<line x1="${L}" x2="${L + iw}" y1="${y(st[k])}" y2="${y(st[k])}" stroke="${col}" stroke-width="1.5" stroke-dasharray="5 4"/><text class="tl" x="${L + iw + 8}" y="${y(st[k]) + 3.5}" style="fill:${col}">${CL.ZONE_LABEL[k]} ${st[k]}</text>`;
+    for (const [k, col, txt] of [['amber', 'var(--z-amber)', 'var(--z-amber-text)'], ['red', 'var(--z-red)', 'var(--z-red-text)'], ['critical', 'var(--z-crit)', 'var(--z-crit-text)']]) {
+      s += `<line x1="${L}" x2="${L + iw}" y1="${y(st[k])}" y2="${y(st[k])}" stroke="${col}" stroke-width="1.5" stroke-dasharray="5 4"/><text class="tl" x="${L + iw + 8}" y="${y(st[k]) + 3.5}" style="fill:${txt}">${CL.ZONE_LABEL[k]} ${st[k]}</text>`;
     }
     return `<svg viewBox="0 0 ${W} ${Ht}" role="img" aria-label="Weekly Load Index for ${esc(g.name)}, stacked by initiative">${s}</svg>`;
   }
@@ -424,25 +473,30 @@
           <div><span class="v">${r0(pk.index)}</span><span class="k">Peak, week of ${CL.fmtWeek(pk.w)}</span></div>
           <div><span class="v">${redWeeks}</span><span class="k">Weeks at Red or Critical</span></div>
         </div>
-        <div class="chart chart-wrap">${groupChart(g, loads)}</div>
+        <div class="chart chart-wrap"><div class="scroll-x">${groupChart(g, loads)}</div></div>
         <div class="legend">${g.strain ? '<span><i class="swatch" style="background:var(--strain)"></i>Baseline strain</span>' : ''}${touching.filter((i) => used.has(i.id)).map((i) => `<span><i class="swatch" style="background:${color(i)}"></i>${esc(i.name)}</span>`).join('')}</div>
       </div>
       <h2>Impacts on this group</h2>
-      ${rows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Initiative</th><th>Type</th><th class="r">Intensity</th><th class="r">Hours</th><th class="r">Affected</th><th>Runs</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="empty">No initiative touches this group.</p>'}`;
+      ${rows ? `<div class="tbl-wrap"><div class="scroll-x"><table class="tbl"><thead><tr><th>Initiative</th><th>Type</th><th class="r">Intensity</th><th class="r">Hours</th><th class="r">Affected</th><th>Runs</th></tr></thead><tbody>${rows}</tbody></table></div></div>` : '<p class="empty">No initiative touches this group.</p>'}`;
   }
 
   /* ---------- Alerts ---------- */
   function viewAlerts(loads) {
     const dig = CL.digest(state, loads);
-    const digest = dig.length ? dig.map((r) => `<div class="feed-item"><span class="stripe ${r.worst}"></span>
+    const digest = dig.length ? dig.map((r) => {
+      // The driver worth opening: the biggest contributor that can still move (work in flight cannot).
+      const pick = r.drivers.map(initById).find((i) => i && i.status !== 'in_flight') || initById(r.drivers[0]);
+      return `<div class="feed-item"><span class="stripe ${r.worst}"></span><div class="feed-body">
         <div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap"><strong>${esc(r.group.name)}</strong>${zonePill(r.worst)}</div>
         <span>Forecast at Red or Critical in the weeks of ${weeksText(r.weeks)}. Peak ${r0(r.peak.index)} in the week of ${CL.fmtWeek(r.peak.w)}.</span>
-        <span class="muted" style="font-size:.82rem">Driven by ${esc(listNames(r.drivers.slice(0, 3).map((id) => initById(id).name)))}.</span></div>`).join('')
+        <span class="muted" style="font-size:.82rem">Driven by ${esc(listNames(r.drivers.slice(0, 3).map((id) => initById(id).name)))}.</span>
+        <div class="actions" style="justify-content:flex-start;margin-top:4px"><button class="btn" data-act="group" data-g="${r.group.id}">Open group view</button>${pick ? `<button class="btn" data-act="edit" data-id="${pick.id}">Check ${esc(pick.name)}</button>` : ''}</div></div></div>`;
+    }).join('')
       : '<p class="empty">No group is forecast at Red or Critical in the next 8 weeks.</p>';
     const fmt = (ts) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-    const feed = state.feed.length ? state.feed.map((f) => `<div class="feed-item"><span class="stripe ${f.kind}"></span>
-        <div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap"><strong>${esc(f.name)}</strong><span class="when">${fmt(f.ts)} · ${esc(f.by)}</span></div>
-        <span>${esc(f.text)}</span>${f.note ? `<blockquote>${esc(f.note)}</blockquote>` : ''}</div>`).join('')
+    const feed = state.feed.length ? state.feed.map((f) => `<div class="feed-item"><span class="stripe ${f.kind}"></span><div class="feed-body">
+        <div style="display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap">${initById(f.initId) ? `<button class="linkish" data-act="edit" data-id="${f.initId}">${esc(f.name)}</button>` : `<strong>${esc(f.name)}</strong>`}<span class="when">${fmt(f.ts)} · ${esc(f.by)}</span></div>
+        <span>${esc(f.text)}</span>${f.note ? `<blockquote>${esc(f.note)}</blockquote>` : ''}</div></div>`).join('')
       : '<p class="empty" style="margin:16px">Nothing yet. Saving an initiative records it here, and saves at Red or Critical carry the justification or decision request.</p>';
     return `<div class="page-head"><div><div class="eyebrow">Alerts</div><h1>Weekly digest</h1><p class="lede">Groups forecast to reach Red or Critical in the next 8 weeks, from ${CL.fmtWeekLong(0)}, and the initiatives driving it. In a live deployment this goes out by email and Teams.</p></div></div>
       <div class="panel feed">${digest}</div>
@@ -471,7 +525,7 @@
           ${num('s-conc', 'concurrency', st.concurrency, 'Concurrency penalty per extra initiative', '', 0.01)}${num('s-glp', 'goLivePenalty', st.goLivePenalty, 'Extra penalty per overlapping go-live', '', 0.01)}</div>
       </div>
       <h2>Employee groups</h2>
-      <div class="tbl-wrap"><table class="tbl impacts" style="min-width:520px"><thead><tr><th>Group</th><th>FTE</th><th>Capacity %</th><th>Baseline strain (0 to 40)</th></tr></thead><tbody>${grows}</tbody></table></div>`;
+      <div class="tbl-wrap compact"><div class="scroll-x"><table class="tbl impacts compact"><thead><tr><th>Group</th><th>FTE</th><th>Capacity %</th><th>Baseline strain (0 to 40)</th></tr></thead><tbody>${grows}</tbody></table></div></div>`;
   }
 
   /* ---------- Guided demo ----------
@@ -510,17 +564,20 @@
     const el = $(TOUR[i].focus);
     if (el) { const r = el.getBoundingClientRect(); if (r.top < 0 || r.bottom > innerHeight - 200) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
   }
+  let tourShown = null;
   function renderTour() {
     document.querySelectorAll('.tour-focus').forEach((el) => el.classList.remove('tour-focus'));
+    document.body.classList.toggle('touring', ui.tour != null);
     let box = $('.tour');
-    if (ui.tour == null) { if (box) box.remove(); return; }
+    if (ui.tour == null) { if (box) box.remove(); tourShown = null; return; }
     if (!box) { box = document.createElement('div'); box.className = 'tour'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Guided demo'); document.body.appendChild(box); }
     const s = TOUR[ui.tour], last = ui.tour === TOUR.length - 1;
     $(s.focus)?.classList.add('tour-focus');
-    box.innerHTML = `<div class="tour-top"><span class="eyebrow">Guided demo · ${ui.tour + 1} of ${TOUR.length}</span><button class="btn ghost" data-act="tour-end" aria-label="Close the tour">×</button></div>
-      <div class="tour-dots">${TOUR.map((_, k) => `<i class="${k <= ui.tour ? 'on' : ''}"></i>`).join('')}</div>
-      <h3>${esc(s.t)}</h3><p>${esc(s.b)}</p>
-      <div class="actions">${ui.tour ? '<button class="btn" data-act="tour-back">Back</button>' : ''}${last ? '<button class="btn" data-act="tour-reset">Restore demo data</button><button class="btn primary" data-act="tour-end">Explore on your own</button>' : '<button class="btn primary" data-act="tour-next">Next</button>'}</div>`;
+    box.innerHTML = `<div class="tour-step"><span class="eyebrow">Guided demo · ${ui.tour + 1} of ${TOUR.length}</span><div class="tour-dots">${TOUR.map((_, k) => `<i class="${k <= ui.tour ? 'on' : ''}"></i>`).join('')}</div></div>
+      <div class="tour-body"><h3>${esc(s.t)}</h3><p>${esc(s.b)}</p></div>
+      <div class="actions">${ui.tour ? '<button class="btn" data-act="tour-back">Back</button>' : ''}${last ? '<button class="btn" data-act="tour-reset">Restore demo data</button><button class="btn primary" data-act="tour-end">Explore on your own</button>' : '<button class="btn primary" data-act="tour-next">Next</button>'}<button class="btn ghost close" data-act="tour-end" aria-label="Close the tour" title="Close (Esc)">×</button></div>`;
+    // Keyboard users land on the next step's button; a re-render of the same step leaves focus where it is.
+    if (tourShown !== ui.tour) { tourShown = ui.tour; box.querySelector('.btn.primary')?.focus({ preventScroll: true }); }
   }
 
   /* ---------- Navigation and events ---------- */
@@ -571,8 +628,9 @@
     }
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.matches('tr[data-act]')) e.target.click();
-    if (ui.tour != null && e.target === document.body) {
+    if (e.key === 'Enter' && e.target.matches('tr[data-act], [role="button"][data-act]')) e.target.click();
+    if (e.key === ' ' && e.target.matches('[role="button"][data-act]')) { e.preventDefault(); e.target.click(); }
+    if (ui.tour != null && !e.target.matches('input, select, textarea')) {
       if (e.key === 'ArrowRight' && ui.tour < TOUR.length - 1) tourGo(ui.tour + 1);
       else if (e.key === 'ArrowLeft' && ui.tour > 0) tourGo(ui.tour - 1);
       else if (e.key === 'Escape') { ui.tour = null; render(); }
@@ -597,6 +655,7 @@
     } else if (t.dataset.note) {
       ui.note = t.value;
       const b = $('[data-act="save"]'); if (b && b.textContent !== 'Save initiative') b.disabled = !ui.note.trim();
+      const h = $('#save-hint'); if (h) h.textContent = ui.note.trim() ? 'ChangeLoad warns and escalates. It never blocks a project.' : h.dataset.blocked;
     } else if (t.dataset.set) {
       const v = parseFloat(t.value); if (!isFinite(v)) return;
       const [a, b] = t.dataset.set.split('.');
